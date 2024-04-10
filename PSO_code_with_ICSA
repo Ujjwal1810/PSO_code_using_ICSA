@@ -1,0 +1,224 @@
+clc;
+clear;
+close all;
+
+
+%% Parameters of PSO
+
+MaxIt = 2000;           % Maximum Number of Iterations
+order = 91;
+noOfCoeff = order + 1;
+nPop = 32;              % Population Size (Swarm Size)  Size of the frequency list
+w = 0.3;                % Intertia Coefficient
+wdamp = 0.9999;          % Damping Ratio of Inertia Coefficient
+c1 = 2;                 % Personal Acceleration Coefficient
+c2 = 2;                 % Social Acceleration Coefficient
+ShowIterInfo = true;    % Flag for Showing Iteration Informatin
+isfirstPrint = false;
+
+MaxPosition = 1;
+MinPosition = -1;
+MaxVelocity = 2;
+MinVelocity = -2;
+
+
+
+%% Starting plot of desired graph
+
+fs = 1000;
+%fstop1 = 50;
+%fstop2 = 450;
+fstop1 = 0.38 * (fs/2);
+fstop2 = 0.53 * (fs/2);
+%{ 
+ws1=0.38*pi;
+ws2=0.53*pi;
+wp1=0.4*pi;
+wp2=0.5*pi;
+%}
+%desiredFilter = fir1(71, [0.38 0.4 0.5 0.53], 'bandpass', chebwin(72, 60));
+desiredFilter = fir1(91,[0.38 0.4 0.5 0.53], 'bandpass', kaiser(92,8));
+%desiredFilter = fir1(71,[0.38 0.4 0.5 0.53], 'bandpass', rectwin(72));
+%desiredFilter = fir1(31,0.5,rectwin(32));
+
+disp(desiredFilter);
+[desiredFilter_h, desiredFilter_w] = freqz(desiredFilter, 1, 'whole', 1000);
+
+figure('name', 'PSO on FIR order 31');
+    
+%plot(desiredFilter_w/pi,20*log10(abs(desiredFilter_h)));
+freqz(desiredFilter);
+
+%% Initialization
+
+% The Particle Template
+particle_struct.Position = [];
+particle_struct.Velocity = [];
+particle_struct.Best.Position = [];
+
+
+% Create Population Array
+particle = repmat(particle_struct, nPop, 1);
+
+% Initialize Global Best
+GlobalBest.Position = unifrnd(MinPosition, MaxPosition, 1, noOfCoeff);
+
+% Initialize Population Members
+for i=1:nPop
+
+    % Generate Random Solution
+    particle(i).Position = unifrnd(MinPosition, MaxPosition, 1, noOfCoeff);
+    particle(i).Velocity = unifrnd(MinVelocity, MaxVelocity, 1, noOfCoeff);
+   
+    particle(i).Best.Position = particle(i).Position;
+   
+    if findError(particle(i).Position, desiredFilter_h) < findError(GlobalBest.Position, desiredFilter_h)
+        GlobalBest.Position  = particle(i).Position;
+    end
+
+end
+
+
+
+disp('Running PSO...');
+%% Main Loop of PSO
+tic;
+for it=1:MaxIt
+
+    for i=1:nPop
+       
+        % Update Velocity
+        for j = 1:noOfCoeff
+            particle(i).Velocity(j) = w*particle(i).Velocity(j) ...
+                + c1*rand*(particle(i).Best.Position(j) - particle(i).Position(j)) ...
+                + c2*rand*(GlobalBest.Position(j) - particle(i).Position(j));
+        end
+        
+        % Update Position
+        particle(i).Position = particle(i).Position + particle(i).Velocity;
+        
+        % Update Local Best
+        if findError(particle(i).Position, desiredFilter_h) < findError(particle(i).Best.Position, desiredFilter_h)
+            
+            particle(i).Best.Position = particle(i).Position;
+            
+            % Update Global Best
+            if findError(particle(i).Best.Position, desiredFilter_h) < findError(GlobalBest.Position, desiredFilter_h)
+                GlobalBest.Position = particle(i).Best.Position;
+            end 
+        end
+    end
+ 
+    
+    % Display Iteration Information
+    if ShowIterInfo
+        hold all
+
+        [temp_y,temp_x] = freqz(GlobalBest.Position,1 , 'whole', 1000);
+        
+        % Check if first entry
+        if(isfirstPrint)
+            delete(mt);
+        end
+        
+        mt = plot(temp_x/pi,20*log10(abs(temp_y)), 'r');
+        
+        %title({['Interation #: ' num2str(it) ' (Population Size: ' num2str(nPop) ')']});
+        title('Magnitude Response (dB)');
+        xlabel('Normalized Frequency (xπ rad/sample)');
+        ylabel('Magnitude (dB)');
+        
+        hold off
+        drawnow
+        isfirstPrint = true;
+        
+    end
+    
+    % Damping Inertia Coefficient
+    w = w * wdamp;
+
+    
+end
+t(i,:)=toc
+%% Calculation of parameters
+
+% Calculate stopband attenuation
+
+    f = linspace(0,fs/2,1024); % Frequency axis
+    HdB = 20*log10(abs(temp_y)); % Convert magnitude to dB
+    fstop1_id = find(f > fstop1, 1); % Lower stopband index
+    fstop2_id = find(f > fstop2, 1); % Upper stopband index
+    %stopband_atten = round(max(HdB(fstop1_id:fstop2_id)) - min(HdB([1:fstop1_id fstop2_id:end]))); % Stopband attenuation
+    stopband_atten = -round(max(HdB(fstop1_id:fstop2_id)));
+    disp(['Stopband attenuation of PSO: ' num2str(stopband_atten) ' dB'])
+    %h_d=20*log10((abs(temp_y+eps))/max(abs(temp_y)));
+    %delta=pi/length(temp_y);
+    %As = -round(max(h_d(0.53/length(temp_y)+1:1:length(temp_y))));
+    %disp(As); 
+%As = -round(max(h_db(0.5/((pi/length(temp_y))+1):1:length(temp_y))));
+
+
+% Apply the optimized filter coefficients to obtain the frequency response
+[h, w] = freqz(GlobalBest.Position, 1, 1024);
+
+% Define the passband frequency range (you should adjust this to your design)
+passband_start = 0.4; % Start of the passband
+passband_end = 0.5;   % End of the passband
+
+% Find the indices corresponding to the passband in the frequency response
+passband_indices = find(w >= passband_start*pi & w <= passband_end*pi);
+
+% Extract the magnitude values within the passband
+passband_magnitude = abs(h(passband_indices));
+
+% Calculate the passband ripple (in dB)
+passband_ripple_dB = 20*log10(max(passband_magnitude) - min(passband_magnitude));
+
+disp(['Passband Ripple (dB): ', num2str(passband_ripple_dB)]);
+%{
+% Apply the optimized filter coefficients to obtain the frequency response
+%[h, w] = freqz(GlobalBest.Position, 1, 1024);
+
+% Define the stopband frequency range (you should adjust this to your design)
+stopband_start = 0.5;  % Start of the stopband
+stopband_end = 0.53;   % End of the stopband
+
+% Find the indices corresponding to the stopband in the frequency response
+stopband_indices = find(w >= stopband_start*pi & w <= stopband_end*pi);
+
+% Extract the magnitude values within the stopband
+stopband_magnitude = abs(h(stopband_indices));
+
+% Calculate the stopband attenuation (in dB) as the negative maximum magnitude
+stopband_attenuation_dB = -max(stopband_magnitude);
+
+disp(['Stopband Attenuation (dB): ', num2str(stopband_attenuation_dB)]);
+%}
+ 
+   %[temp_y,temp_x] = freqz(GlobalBest.Position,1 , 'whole', 1000);
+   %[H1z w1]=freqz(B1,1,256);
+    [h, w] = freqz(GlobalBest.Position, 1, 256);
+    h_db=20*log10((abs(h)+eps)/max(abs(h)));
+    delta_w=pi/length(h);
+    %As=-round(max(h_db(0.53*pi/delta_w+1:1:length(h)))) 
+    Rp(i,:)=-(min(h_db(0.4*pi/delta_w+1:1:0.5*pi/delta_w+1)))
+    
+    %Rp(i,:) = -(min(h_db(round(0.4*pi/delta_w)+1:1:round(0.5*pi/delta_w)+1)));
+
+disp('Done!');
+
+
+function z = findError(currentFilterPosition, desiredFilter_h)
+    [h,w] = freqz(currentFilterPosition,1,'whole',1000);
+    h1 = abs(h);
+    h2 = abs(desiredFilter_h);
+%     disp(h1);
+%     disp(h2);
+    diff = (h1 - h2).^2;
+     
+    result = sum(diff);
+    z = result.^0.5;
+    %X = [' error: ',z];
+    %disp(X)
+    
+end
